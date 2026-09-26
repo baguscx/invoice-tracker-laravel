@@ -35,6 +35,7 @@
 @include('partials.modals')
 
 <script>
+window.APP_BASE_URL = @json(url('/'));
 window.InvoiceTracker = @json($bootstrap);
 </script>
 <script src="{{ asset('js/dashboard.js') }}"></script>

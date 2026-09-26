@@ -23,6 +23,22 @@
     </form>
   </div>
 </div>
+<div id="importModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="importModalTitle">
+  <div class="modal">
+    <div class="modal-head"><div><h3 id="importModalTitle">Impor Invoice dari Excel</h3><div class="muted" style="font-size:12px;margin-top:4px">Format XLSX, XLS, atau CSV. Maksimal 1.000 baris dan 10 MB.</div></div><button id="closeImportModalBtn" class="btn btn-soft icon-btn" type="button">×</button></div>
+    <form id="importForm">
+      <div class="modal-body">
+        <div class="import-help">
+          <strong>Gunakan template agar nama kolom dan format tanggal sesuai.</strong>
+          <span>Impor bersifat atomik: jika satu baris gagal, seluruh file dibatalkan.</span>
+          <a class="btn btn-soft" href="{{ route('invoices.import-template') }}">Unduh Template Excel</a>
+        </div>
+        <div class="field full" style="margin-top:16px"><label>File spreadsheet *</label><input id="invoiceImportFile" name="file" type="file" accept=".xlsx,.xls,.csv,text/csv" required></div>
+      </div>
+      <div class="modal-actions"><button id="cancelImportBtn" class="btn btn-soft" type="button">Batal</button><button id="submitImportBtn" class="btn btn-primary" type="submit">Impor Invoice</button></div>
+    </form>
+  </div>
+</div>
 <div id="detailModal" class="modal-backdrop hidden">
   <div class="modal large">
     <div class="modal-head"><div><h3 id="detailTitle">Detail Invoice</h3><div id="detailSubtitle" class="muted" style="font-size:12px;margin-top:4px"></div></div><button id="closeDetailBtn" class="btn btn-soft icon-btn" type="button">×</button></div>

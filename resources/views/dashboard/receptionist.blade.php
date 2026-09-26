@@ -6,7 +6,7 @@
 <section id="receptionPanel" class="role-panel" data-role="RESEPSIONIS">
   <div class="hero">
     <div><div class="eyebrow">RESEPSIONIS WORKSPACE</div><h1>Meja Penerimaan Invoice</h1><p>Tugas utama: catat invoice → jika lengkap bisa langsung ke Accounting, jika perlu dilengkapi kirim ke User/PIC → terima kembali → Accounting.</p></div>
-    <button class="btn btn-primary add-invoice-btn" type="button">+ Terima Invoice Baru</button>
+    <div class="hero-actions"><button class="btn btn-soft import-invoice-btn" type="button">Impor Excel</button><button class="btn btn-primary add-invoice-btn" type="button">+ Terima Invoice Baru</button></div>
   </div>
 
   <section class="summary">

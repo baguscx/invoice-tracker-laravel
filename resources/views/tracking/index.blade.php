@@ -5,7 +5,7 @@
 @section('content')
 <section class="public-page">
   <div class="topbar"><div class="topbar-inner">
-    <div class="brand"><span class="brand-mark">IF</span><div>Invoice Tracker<small>Laravel Blade + MySQL</small></div></div>
+    <div class="brand"><span class="brand-mark">IF</span><div>Invoice Tracker<small>Pelacakan aman</small></div></div>
     <div class="top-actions">
       <button data-theme-toggle class="btn btn-soft icon-btn" type="button">◐</button>
       @auth
@@ -17,17 +17,18 @@
   </div></div>
 
   <div class="public-wrap">
-    <div class="public-title"><h1>Cek Posisi Invoice</h1><p>Masukkan No Tanda Terima, No Invoice, atau No PO secara lengkap.</p></div>
+    <div class="public-title"><h1>Cek Posisi Invoice</h1><p>Pindai QR pada tanda terima atau masukkan kode akses rahasia.</p></div>
     <form method="GET" action="{{ route('tracking.index') }}" class="searchbar">
-      <input name="q" value="{{ $query }}" required autocomplete="off" placeholder="Contoh: TT-20260925-001">
+      <input name="code" value="{{ $query }}" required minlength="64" maxlength="64" autocomplete="off" placeholder="Kode akses 64 karakter">
       <button class="btn btn-primary" type="submit">Cari</button>
     </form>
+    <p class="muted" style="text-align:center;margin:-10px 0 20px;font-size:11px">Nomor invoice, PO, dan tanda terima tidak dapat digunakan untuk pencarian publik.</p>
 
     <div class="public-result">
       @if($error)
         <div class="result-card" style="text-align:center;color:var(--danger)">{{ $error }}</div>
       @elseif($query !== '' && count($results) === 0)
-        <div class="result-card" style="text-align:center;color:var(--muted)">Invoice tidak ditemukan.</div>
+        <div class="result-card" style="text-align:center;color:var(--muted)">Kode akses tidak valid.</div>
       @endif
 
       @foreach($results as $inv)
@@ -55,7 +56,7 @@
         </div>
       @endforeach
     </div>
-    <div class="muted" style="text-align:center;margin-top:16px;font-size:11px">Invoice Tracker · Laravel MVC</div>
+    <div class="muted" style="text-align:center;margin-top:16px;font-size:11px">Invoice Tracker · Akses dilindungi kode acak</div>
   </div>
 </section>
 @endsection

@@ -48,27 +48,20 @@ class InvoiceTrackerService
         return false;
     }
 
-    public function publicSearch(string $query): array
+    public function publicTrackingData(Invoice $inv): array
     {
-        $query=trim($query);
-        if ($query==='') throw new RuntimeException('Masukkan No Tanda Terima, No Invoice, atau No PO.');
-        $rows=Invoice::with(['picUser','activities'])->where(function($q) use($query){
-            $q->where('invoice_no',$query)->orWhere('po_no',$query)->orWhere('receipt_no',$query);
-        })->latest('updated_at')->get();
-        $results=$rows->map(function(Invoice $inv){
-            $due=$this->dueState($inv->due_date,$inv->status);
-            return [
-                'id'=>$inv->id,'invoiceNo'=>$inv->invoice_no,'poNo'=>$inv->po_no,'supplier'=>$inv->supplier,
-                'receivedDate'=>$this->date($inv->received_date),'receiptNo'=>$inv->receipt_no,'dueDate'=>$this->date($inv->due_date),
-                'status'=>$inv->status,'position'=>$inv->position ?: $this->positionForStatus($inv->status),
-                'missingDocuments'=>$inv->missing_documents ?: '','dueStatus'=>$due['status'],'daysToDue'=>$due['daysToDue'],
-                'picUser'=>$inv->picUser?->username ?: '',
-                'timeline'=>$inv->activities->filter(fn($a)=>!$a->from_status || $a->from_status!==$a->to_status)->map(fn($a)=>[
-                    'time'=>$this->datetime($a->created_at),'fromStatus'=>$a->from_status ?: '','toStatus'=>$a->to_status ?: '','durationHours'=>(float)$a->duration_hours,
-                ])->values()->all(),
-            ];
-        })->all();
-        return ['count'=>count($results),'results'=>$results];
+        $inv->loadMissing(['picUser','activities']);
+        $due=$this->dueState($inv->due_date,$inv->status);
+        return [
+            'invoiceNo'=>$inv->invoice_no,'supplier'=>$inv->supplier,
+            'receivedDate'=>$this->date($inv->received_date),'receiptNo'=>$inv->receipt_no,'dueDate'=>$this->date($inv->due_date),
+            'status'=>$inv->status,'position'=>$inv->position ?: $this->positionForStatus($inv->status),
+            'missingDocuments'=>$inv->missing_documents ?: '','dueStatus'=>$due['status'],'daysToDue'=>$due['daysToDue'],
+            'picUser'=>$inv->picUser?->username ?: '',
+            'timeline'=>$inv->activities->filter(fn($a)=>!$a->from_status || $a->from_status!==$a->to_status)->map(fn($a)=>[
+                'time'=>$this->datetime($a->created_at),'fromStatus'=>$a->from_status ?: '','toStatus'=>$a->to_status ?: '','durationHours'=>(float)$a->duration_hours,
+            ])->values()->all(),
+        ];
     }
 
     public function create(User $actor, array $data): array
@@ -118,8 +111,8 @@ class InvoiceTrackerService
     public function updateWorkInfo(User $actor,string $id,array $payload): array
     {
         return DB::transaction(function() use($actor,$id,$payload){
-            $inv=Invoice::with(['picUser','accountingPic'])->lockForUpdate()->findOrFail($id);
-            if(!$this->canSee($actor,$inv)) throw new RuntimeException('Invoice tidak dapat diakses.');
+            $inv=$this->visibleQuery($actor)->with(['picUser','accountingPic'])->lockForUpdate()->find($id);
+            abort_unless($inv, 404);
             if(!in_array($actor->role,self::ROLES,true)) throw new RuntimeException('Role tidak diizinkan.');
             if($actor->role==='USER'){
                 if((int)$inv->pic_user_id!==(int)$actor->id) throw new RuntimeException('Invoice ini bukan assignment Anda.');
@@ -148,8 +141,8 @@ class InvoiceTrackerService
         $rules=$this->transitionRules(); if(!isset($rules[$action])) throw new RuntimeException('Aksi workflow tidak valid.'); $rule=$rules[$action];
         $this->requireRole($actor,$rule['roles']);
         return DB::transaction(function() use($actor,$id,$action,$note,$targetUsername,$rule){
-            $inv=Invoice::with(['picUser','accountingPic'])->lockForUpdate()->findOrFail($id);
-            if(!$this->canSee($actor,$inv) && $actor->role!=='ADMIN') throw new RuntimeException('Invoice tidak dapat diakses.');
+            $inv=$this->visibleQuery($actor)->with(['picUser','accountingPic'])->lockForUpdate()->find($id);
+            abort_unless($inv, 404);
             $allowed=(array)$rule['from']; if(!in_array($inv->status,$allowed,true)) throw new RuntimeException('Aksi tidak sesuai tahap saat ini. Status invoice: '.$inv->status);
             if($actor->role==='USER' && (int)$inv->pic_user_id!==(int)$actor->id) throw new RuntimeException('Invoice ini bukan assignment Anda.');
             if($actor->role==='ACCOUNTING' && (int)$inv->accounting_pic_id!==(int)$actor->id) throw new RuntimeException('Invoice ini bukan assignment Accounting Anda.');
@@ -175,7 +168,7 @@ class InvoiceTrackerService
 
     public function history(User $actor,string $id): array
     {
-        $inv=Invoice::findOrFail($id); if(!$this->canSee($actor,$inv)) throw new RuntimeException('Invoice tidak ditemukan atau tidak dapat diakses.');
+        $inv=$this->visibleQuery($actor)->find($id); abort_unless($inv, 404);
         return ActivityLog::where('invoice_id',$id)->latest()->get()->map(fn($a)=>[
             'id'=>$a->id,'time'=>$this->datetime($a->created_at),'actorUsername'=>$a->actor_username,'actorName'=>$a->actor_name,'role'=>$a->role,
             'fromStatus'=>$a->from_status,'toStatus'=>$a->to_status,'durationHours'=>(float)$a->duration_hours,'note'=>$a->note,
@@ -226,7 +219,8 @@ class InvoiceTrackerService
             'receiptNo'=>$inv->receipt_no,'dueDate'=>$this->date($inv->due_date),'status'=>$inv->status,'missingDocuments'=>$inv->missing_documents?:'','notes'=>$inv->notes?:'',
             'dueStatus'=>$due['status'],'daysToDue'=>$due['daysToDue']===''?0:(int)$due['daysToDue'],'createdAt'=>$this->datetime($inv->created_at),'updatedAt'=>$this->datetime($inv->updated_at),
             'picUser'=>$inv->picUser?->username?:'','position'=>$inv->position?:$this->positionForStatus($inv->status),'statusUpdatedAt'=>$this->datetime($inv->status_updated_at),
-            'completedAt'=>$this->datetime($inv->completed_at),'accountingPic'=>$inv->accountingPic?->username?:''];
+            'completedAt'=>$this->datetime($inv->completed_at),'accountingPic'=>$inv->accountingPic?->username?:'',
+            'trackingUrl'=>route('tracking.show',$inv->public_tracking_token),'qrUrl'=>route('tracking.qr',$inv->public_tracking_token)];
     }
 
     public function positionForStatus(string $status): string { return ['Baru / Diterima'=>'Resepsionis','Menunggu User'=>'User / PIC','Sedang Diproses User'=>'User / PIC','Menunggu Diterima Resepsionis'=>'User / PIC','Kembali ke Resepsionis'=>'Resepsionis','Menunggu Accounting'=>'Accounting','Diproses Accounting'=>'Accounting','Selesai'=>'Selesai','Batal'=>'Batal'][$status]??'-'; }

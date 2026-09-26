@@ -18,6 +18,14 @@ Konversi dari Google Apps Script `Invoice_Tracker_v35_11_handover_search` ke str
 - `resources/views/partials/modals.blade.php` — modal bersama.
 - `public/js/dashboard.js` — interaksi AJAX ke route Laravel normal; bukan `google.script.run` dan bukan `/rpc`.
 
+## QR aman dan impor Excel
+
+- Setiap invoice memiliki token pelacakan publik acak 64 karakter. Pencarian publik tidak menerima No Invoice, No PO, atau No Tanda Terima.
+- QR pada tanda terima membuka URL bertoken dan endpoint pelacakan diberi rate limit serta instruksi `noindex`.
+- Admin dan Resepsionis dapat mengimpor `.xlsx`, `.xls`, atau `.csv` melalui tombol **Impor Excel** di dashboard.
+- Template Excel dapat diunduh dari modal impor. Maksimal 1.000 baris/10 MB; seluruh impor dibatalkan jika satu baris tidak valid.
+- Ekstensi PHP `zip` wajib aktif untuk XLS/XLSX (`extension=zip` pada `php.ini`).
+
 ## Route utama
 
 ```text
@@ -27,6 +35,8 @@ POST   /login                    proses login
 POST   /logout                   logout
 GET    /dashboard                dashboard sesuai role
 POST   /invoices                 buat invoice
+POST   /invoices/import          impor invoice dari spreadsheet
+GET    /invoices/import/template unduh template Excel
 PUT    /invoices/{invoice}       edit invoice
 PATCH  /invoices/{invoice}/work  update pekerjaan/checklist
 PATCH  /invoices/{invoice}/transition perpindahan status
@@ -36,6 +46,8 @@ GET    /admin/users              daftar user
 POST   /admin/users              simpan user
 GET    /admin/activity           aktivitas terbaru
 GET    /admin/cancelled-invoices audit pembatalan
+GET    /track/{token}            pelacakan publik dengan token rahasia
+GET    /track/{token}/qr.svg     QR pelacakan
 ```
 
 ## Instalasi di Laragon
@@ -66,6 +78,18 @@ php artisan migrate --seed
 php artisan optimize:clear
 php artisan serve
 ```
+
+## Deployment production di subfolder
+
+Untuk deployment pada `https://baguscx.com/invoice-tracker`, arahkan web server ke folder `public` aplikasi dan gunakan konfigurasi berikut pada `.env` server (jangan commit file `.env` atau credential):
+
+```env
+APP_ENV=production
+APP_DEBUG=false
+APP_URL=https://baguscx.com/invoice-tracker
+```
+
+Route di `routes/web.php` tetap tanpa prefix `invoice-tracker`. Prefix berasal dari lokasi aplikasi/web server dan `APP_URL`; Blade menggunakan `route()`/`asset()`, sedangkan request JavaScript menggunakan base URL yang diekspos layout. Setelah mengubah konfigurasi production, jalankan `php artisan optimize:clear` agar cache konfigurasi lama tidak dipakai.
 
 Akun seed awal:
 

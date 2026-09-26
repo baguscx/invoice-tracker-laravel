@@ -6,6 +6,7 @@
 <section id="adminPanel" class="role-panel" data-role="ADMIN">
   <div class="hero">
     <div><div class="eyebrow">ADMIN WORKSPACE</div><h1>Control Center</h1><p>Monitor seluruh alur, beban PIC, keterlambatan, user, dan jejak aktivitas.</p></div>
+    <div class="hero-actions"><button class="btn btn-soft import-invoice-btn" type="button">Impor Excel</button><button class="btn btn-primary add-invoice-btn" type="button">+ Invoice Baru</button></div>
   </div>
 
   <section class="summary admin-summary">

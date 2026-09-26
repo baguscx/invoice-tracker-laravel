@@ -1,6 +1,7 @@
 const STATUS_FLOW = ['Baru / Diterima','Menunggu User','Sedang Diproses User','Menunggu Diterima Resepsionis','Kembali ke Resepsionis','Menunggu Accounting','Diproses Accounting','Selesai'];
 const DOCS = [['GR','Goods Receipt'],['PO','Purchase Order'],['FP','Faktur Pajak'],['SJ','Surat Jalan'],['INV','Invoice'],['LAINNYA','Lainnya']];
 const bootstrap = window.InvoiceTracker || {};
+const BASE_URL = String(window.APP_BASE_URL || '').replace(/\/+$/, '');
 let currentUser = bootstrap.user || null;
 let invoices = Array.isArray(bootstrap.invoices) ? bootstrap.invoices : [];
 let assignableUsers = Array.isArray(bootstrap.users) ? bootstrap.users : [];
@@ -10,6 +11,12 @@ let adminUsers = [];
 let adminActivity = [];
 let adminCancelled = [];
 const $ = id => document.getElementById(id);
+
+function appUrl(path=''){
+  const normalizedPath=String(path).replace(/^\/+/, '');
+  if(!normalizedPath)return BASE_URL||'/';
+  return `${BASE_URL}/${normalizedPath}`;
+}
 
 initDashboard();
 
@@ -27,7 +34,11 @@ function initDashboard(){
 function bindDashboardEvents(){
   $('themeBtn')?.addEventListener('click',toggleTheme);
   document.querySelectorAll('.add-invoice-btn').forEach(btn=>btn.addEventListener('click',()=>openInvoiceModal()));
+  document.querySelectorAll('.import-invoice-btn').forEach(btn=>btn.addEventListener('click',openImportModal));
   $('invoiceForm')?.addEventListener('submit',saveInvoice);
+  $('importForm')?.addEventListener('submit',importInvoices);
+  $('closeImportModalBtn')?.addEventListener('click',closeImportModal);
+  $('cancelImportBtn')?.addEventListener('click',closeImportModal);
   $('closeInvoiceModalBtn')?.addEventListener('click',closeInvoiceModal);
   $('cancelInvoiceBtn')?.addEventListener('click',closeInvoiceModal);
   $('closeDetailBtn')?.addEventListener('click',closeDetail);
@@ -36,6 +47,7 @@ function bindDashboardEvents(){
   $('closeReceiptBottomBtn')?.addEventListener('click',closeReceiptPreview);
   $('printReceiptBtn')?.addEventListener('click',printReceipt);
   $('invoiceModal')?.addEventListener('click',e=>{if(e.target.id==='invoiceModal')closeInvoiceModal()});
+  $('importModal')?.addEventListener('click',e=>{if(e.target.id==='importModal')closeImportModal()});
   $('detailModal')?.addEventListener('click',e=>{if(e.target.id==='detailModal')closeDetail()});
   $('receiptModal')?.addEventListener('click',e=>{if(e.target.id==='receiptModal')closeReceiptPreview()});
   $('actionDialogCancel')?.addEventListener('click',()=>resolveActionDialog(null));
@@ -55,13 +67,51 @@ function bindDashboardEvents(){
 }
 
 async function requestJson(url,{method='GET',body=null}={}){
-  const options={method,credentials:'same-origin',headers:{'Accept':'application/json','X-CSRF-TOKEN':document.querySelector('meta[name="csrf-token"]')?.content||''}};
+  const options={method,credentials:'same-origin',headers:{'Accept':'application/json','X-Requested-With':'XMLHttpRequest','X-CSRF-TOKEN':document.querySelector('meta[name="csrf-token"]')?.content||''}};
   if(body!==null){options.headers['Content-Type']='application/json';options.body=JSON.stringify(body)}
   const response=await fetch(url,options);
-  let data={};
-  try{data=await response.json()}catch(_){data={message:'Respons server tidak valid.'}}
-  if(!response.ok) throw new Error(data?.message||'Permintaan gagal diproses server.');
-  return data;
+  return parseApiResponse(response);
+}
+
+async function requestForm(url,formData){
+  const response=await fetch(url,{method:'POST',credentials:'same-origin',headers:{'Accept':'application/json','X-Requested-With':'XMLHttpRequest','X-CSRF-TOKEN':document.querySelector('meta[name="csrf-token"]')?.content||''},body:formData});
+  return parseApiResponse(response);
+}
+
+async function parseApiResponse(response){
+  const raw=await response.text();
+  let data=null;
+  if(raw){try{data=JSON.parse(raw)}catch(_){data=null}}
+
+  if(response.ok&&data!==null)return data;
+  if(response.ok&&!raw)return {};
+
+  const status=response.status;
+  const prefix=`HTTP ${status}`;
+  const validationMessage=status===422&&data?.errors
+    ? Object.values(data.errors).flat().filter(Boolean).join(' ')
+    : '';
+  const serverMessage=typeof data?.message==='string'?data.message.trim():'';
+  const knownMessages={
+    400:'Data permintaan tidak valid.',
+    401:'Sesi login telah berakhir. Silakan login kembali.',
+    403:'Anda tidak memiliki izin untuk melakukan aksi ini.',
+    404:'Endpoint atau data yang diminta tidak ditemukan.',
+    419:'Sesi atau token CSRF telah kedaluwarsa. Muat ulang halaman lalu coba lagi.',
+    422:'Data yang dikirim tidak valid.',
+    429:'Terlalu banyak permintaan. Tunggu sebentar lalu coba lagi.',
+    500:'Terjadi kesalahan pada server. Silakan coba lagi atau hubungi administrator.',
+    502:'Server sementara tidak dapat dijangkau.',
+    503:'Layanan sementara tidak tersedia.',
+  };
+
+  if(!response.ok){
+    const safeMessage=status>=500?(knownMessages[status]||knownMessages[500]):(validationMessage||serverMessage||knownMessages[status]||'Permintaan gagal diproses server.');
+    throw new Error(`${prefix}: ${safeMessage}`);
+  }
+
+  if(response.redirected)throw new Error('Respons server bukan JSON. Sesi login mungkin telah berakhir; silakan muat ulang halaman dan login kembali.');
+  throw new Error(`HTTP ${status}: Respons server bukan JSON. Periksa URL aplikasi dan konfigurasi server.`);
 }
 
 function renderRoleWorkspace(){
@@ -377,7 +427,7 @@ async function runTransition(id,action,targetUsername=''){
   if(!result)return;
   note=result.note||'';
   try{
-    const res=await requestJson(`/invoices/${encodeURIComponent(id)}/transition`,{method:'PATCH',body:{action,note,targetUsername}});
+    const res=await requestJson(appUrl(`invoices/${encodeURIComponent(id)}/transition`),{method:'PATCH',body:{action,note,targetUsername}});
     replaceInvoice(res.invoice);renderRoleWorkspace();if(currentUser.role==='ADMIN')loadAdminExtras();
     const successMsg=action==='RETURN_TO_RECEPTION'?'Dokumen ditandai sudah diserahkan. Menunggu konfirmasi penerimaan dari Resepsionis.':action==='CONFIRM_RECEPTION_RECEIPT'?'Dokumen fisik dikonfirmasi sudah diterima Resepsionis.':action==='RETURN_ACCOUNTING_TO_RECEPTION'?'Invoice dikembalikan ke Resepsionis beserta catatan koreksi.':action==='DIRECT_TO_ACCOUNTING'?'Invoice langsung dikirim ke Accounting.':action==='CANCEL'?'Invoice berhasil dibatalkan dan riwayatnya tetap tersimpan.':'Status berhasil diperbarui.';
     toast(successMsg,'success');
@@ -412,6 +462,29 @@ function openInvoiceModal(inv=null,mode='base'){
 }
 function closeInvoiceModal(){$('invoiceModal').classList.add('hidden');modalInvoice=null}
 
+function openImportModal(){
+  $('importForm')?.reset();
+  $('importModal')?.classList.remove('hidden');
+}
+function closeImportModal(){$('importModal')?.classList.add('hidden')}
+async function importInvoices(e){
+  e.preventDefault();
+  const file=$('invoiceImportFile')?.files?.[0];
+  if(!file){toast('Pilih file spreadsheet terlebih dahulu.','warning');return;}
+  const button=$('submitImportBtn');
+  const formData=new FormData();formData.append('file',file);
+  setLoading(button,true,'Mengimpor...');
+  try{
+    const res=await requestForm(appUrl('invoices/import'),formData);
+    const imported=Array.isArray(res.invoices)?res.invoices:[];
+    imported.forEach(replaceInvoice);
+    closeImportModal();populateAdminFilters();renderRoleWorkspace();
+    if(currentUser?.role==='ADMIN')loadAdminExtras();
+    toast(res.message||`${imported.length} invoice berhasil diimpor.`,'success');
+  }catch(err){toast(err.message,'error')}
+  finally{setLoading(button,false,'Impor Invoice')}
+}
+
 async function saveInvoice(e){
   e.preventDefault();
   const submitBtn=e.submitter||$('saveInvoiceBtn');
@@ -421,11 +494,11 @@ async function saveInvoice(e){
   setLoading(submitBtn,true,wantsPrint?'Menyimpan...':'Menyimpan...');
   try{
     let res;
-    if(mode==='work-user')res=await requestJson(`/invoices/${encodeURIComponent(id)}/work`,{method:'PATCH',body:{missingDocuments:docs,notes:$('notes').value.trim()}});
-    else if(mode==='work-accounting')res=await requestJson(`/invoices/${encodeURIComponent(id)}/work`,{method:'PATCH',body:{notes:$('notes').value.trim()}});
+    if(mode==='work-user')res=await requestJson(appUrl(`invoices/${encodeURIComponent(id)}/work`),{method:'PATCH',body:{missingDocuments:docs,notes:$('notes').value.trim()}});
+    else if(mode==='work-accounting')res=await requestJson(appUrl(`invoices/${encodeURIComponent(id)}/work`),{method:'PATCH',body:{notes:$('notes').value.trim()}});
     else{
       const data={invoiceNo:$('invoiceNo').value.trim(),poNo:$('poNo').value.trim(),supplier:$('supplier').value.trim(),receivedDate:$('receivedDate').value,amount:$('amount').value,receiptNo:$('receiptNo').value.trim(),dueDate:$('dueDate').value,picUser:$('picUser').value,accountingPic:$('accountingPic').value,missingDocuments:docs,notes:$('notes').value.trim()};
-      res=id?await requestJson(`/invoices/${encodeURIComponent(id)}`,{method:'PUT',body:data}):await requestJson('/invoices',{method:'POST',body:data});
+      res=id?await requestJson(appUrl(`invoices/${encodeURIComponent(id)}`),{method:'PUT',body:data}):await requestJson(appUrl('invoices'),{method:'POST',body:data});
     }
     if(res?.invoice){if(id)replaceInvoice(res.invoice);else invoices.unshift(res.invoice)}
     const savedInvoice=res?.invoice||null;
@@ -438,7 +511,7 @@ async function saveInvoice(e){
   }
 }
 
-async function removeInvoice(id){const inv=invoices.find(x=>x.id===id);if(!inv)return;const ok=await showActionDialog({tone:'danger',icon:'!',title:'Hapus Invoice',message:`Hapus ${primaryNo(inv)}? Data invoice akan dihapus dari database.`,confirmText:'Hapus Invoice'});if(!ok)return;try{await requestJson(`/invoices/${encodeURIComponent(id)}`,{method:'DELETE'});invoices=invoices.filter(x=>x.id!==id);renderRoleWorkspace();toast('Invoice berhasil dihapus.','success')}catch(err){toast(err.message,'error')}}
+async function removeInvoice(id){const inv=invoices.find(x=>x.id===id);if(!inv)return;const ok=await showActionDialog({tone:'danger',icon:'!',title:'Hapus Invoice',message:`Hapus ${primaryNo(inv)}? Data invoice akan dihapus dari database.`,confirmText:'Hapus Invoice'});if(!ok)return;try{await requestJson(appUrl(`invoices/${encodeURIComponent(id)}`),{method:'DELETE'});invoices=invoices.filter(x=>x.id!==id);renderRoleWorkspace();toast('Invoice berhasil dihapus.','success')}catch(err){toast(err.message,'error')}}
 function replaceInvoice(inv){const i=invoices.findIndex(x=>x.id===inv.id);if(i>=0)invoices[i]=inv;else invoices.unshift(inv)}
 
 function openReceiptPreviewById(id){const inv=invoices.find(x=>x.id===id);if(inv)openReceiptPreview(inv)}
@@ -463,7 +536,8 @@ function openReceiptPreview(inv){
       <div class="receipt-field full"><span>Kelengkapan Dokumen</span><strong>${docStatus}</strong></div>
     </div>
     <div class="receipt-note">Dokumen invoice tersebut telah diterima oleh Resepsionis dan selanjutnya akan diproses sesuai alur internal perusahaan.</div>
-    <div class="receipt-footer"><span>Dicetak: ${escapeHtml(printedAt)}</span><span>ID: ${escapeHtml(inv.id||'-')}</span></div>`;
+    ${inv.qrUrl?`<div class="receipt-tracking"><img class="receipt-qr" src="${escapeAttr(inv.qrUrl)}" alt="QR pelacakan invoice"><div><strong>Pindai untuk cek posisi invoice</strong><span>Tautan memiliki kode akses rahasia. Jangan sebarkan di luar pihak terkait.</span></div></div>`:''}
+    <div class="receipt-footer"><span>Dicetak: ${escapeHtml(printedAt)}</span><span>No. Tanda Terima: ${escapeHtml(inv.receiptNo||'-')}</span></div>`;
   $('receiptModal').classList.remove('hidden');
 }
 function closeReceiptPreview(){$('receiptModal')?.classList.add('hidden')}
@@ -512,7 +586,9 @@ function printReceipt(){
   .receipt-field span{display:block;font-size:6.4pt;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:.7mm}
   .receipt-field strong{font-size:8.7pt;line-height:1.25;word-break:break-word}
   .receipt-note{margin-top:3mm;padding:2.2mm 3mm;background:#f8fafc;border:.25mm solid #e2e8f0;border-radius:2mm;font-size:7pt;line-height:1.3}
-  .receipt-footer{display:flex;justify-content:space-between;gap:4mm;margin-top:3mm;padding-top:2mm;border-top:.25mm dashed #cbd5e1;color:#64748b;font-size:6pt}
+  .receipt-tracking{display:flex;align-items:center;gap:3mm;margin-top:2.5mm;padding:2mm;border:.25mm solid #e2e8f0;border-radius:2mm}
+  .receipt-qr{width:21mm;height:21mm;flex:0 0 21mm}.receipt-tracking strong{display:block;font-size:7pt}.receipt-tracking span{display:block;margin-top:1mm;color:#64748b;font-size:6.2pt;line-height:1.25}
+  .receipt-footer{display:flex;justify-content:space-between;gap:4mm;margin-top:2mm;padding-top:1.5mm;border-top:.25mm dashed #cbd5e1;color:#64748b;font-size:6pt}
 </style></head><body>
 <div class="print-page">
   <div class="receipt-half top"><div class="receipt-sheet">${source.innerHTML}</div></div>
@@ -523,7 +599,9 @@ function printReceipt(){
   doc.close();
 
   const cleanup=()=>{try{frame.remove()}catch(_){}};
+  let printStarted=false;
   const runPrint=()=>{
+    if(printStarted)return;printStarted=true;
     try{
       frame.contentWindow.focus();
       frame.contentWindow.addEventListener('afterprint',cleanup,{once:true});
@@ -534,12 +612,16 @@ function printReceipt(){
       toast('Gagal membuka dialog cetak. Coba izinkan print pada browser.','error');
     }
   };
-  setTimeout(runPrint,180);
+  const images=Array.from(doc.images||[]);
+  if(images.length){
+    Promise.all(images.map(img=>img.complete?Promise.resolve():new Promise(resolve=>{img.addEventListener('load',resolve,{once:true});img.addEventListener('error',resolve,{once:true})}))).then(runPrint);
+    setTimeout(runPrint,2000);
+  }else setTimeout(runPrint,180);
 }
 
 async function openDetail(id){
   const inv=invoices.find(x=>x.id===id);if(!inv)return;$('detailTitle').textContent=primaryNo(inv);$('detailSubtitle').textContent=`No Invoice: ${inv.invoiceNo||'-'} · ${inv.supplier} · ${inv.position}`;$('detailContent').innerHTML='<div class="muted">Memuat riwayat...</div>';$('detailModal').classList.remove('hidden');
-  try{const history=await requestJson(`/invoices/${encodeURIComponent(id)}/history`);$('detailContent').innerHTML=renderDetail(inv,history||[])}catch(err){$('detailContent').innerHTML=`<div class="muted">${escapeHtml(err.message)}</div>`}
+  try{const history=await requestJson(appUrl(`invoices/${encodeURIComponent(id)}/history`));$('detailContent').innerHTML=renderDetail(inv,history||[])}catch(err){$('detailContent').innerHTML=`<div class="muted">${escapeHtml(err.message)}</div>`}
 }
 function closeDetail(){$('detailModal').classList.add('hidden')}
 function historyEventTitle(h){
@@ -558,7 +640,7 @@ function renderDetail(inv,history){
 
 async function loadAdminExtras(){
   if(currentUser?.role!=='ADMIN')return;
-  try{const [users,activity,cancelled]=await Promise.all([requestJson('/admin/users'),requestJson('/admin/activity?limit=30'),requestJson('/admin/cancelled-invoices')]);adminUsers=Array.isArray(users)?users:[];adminActivity=Array.isArray(activity)?activity:[];adminCancelled=Array.isArray(cancelled)?cancelled:[];renderAdminUsers();renderAdminActivity();renderAdminCancelled();}catch(err){toast(err.message,'error')}
+  try{const [users,activity,cancelled]=await Promise.all([requestJson(appUrl('admin/users')),requestJson(appUrl('admin/activity?limit=30')),requestJson(appUrl('admin/cancelled-invoices'))]);adminUsers=Array.isArray(users)?users:[];adminActivity=Array.isArray(activity)?activity:[];adminCancelled=Array.isArray(cancelled)?cancelled:[];renderAdminUsers();renderAdminActivity();renderAdminCancelled();}catch(err){toast(err.message,'error')}
 }
 function renderAdminCancelled(){
   if(!$('adminCancelledBody'))return;
@@ -575,7 +657,7 @@ function renderAdminActivity(){
 }
 function editAdminUser(username){const u=adminUsers.find(x=>x.username===username);if(!u)return;$('adminUserUsername').value=u.username;$('adminUserUsername').readOnly=true;$('adminUserName').value=u.name||'';$('adminUserRole').value=u.role;$('adminUserEmail').value=u.email||'';$('adminUserPassword').value='';$('adminUserActive').checked=!!u.active;$('adminUserPassword').placeholder='Kosong = password lama tetap'}
 function resetAdminUserForm(){$('adminUserForm').reset();$('adminUserUsername').readOnly=false;$('adminUserActive').checked=true;$('adminUserPassword').placeholder='Password baru / kosong = tetap'}
-async function saveAdminUser(e){e.preventDefault();const submit=e.submitter;setLoading(submit,true,'Menyimpan...');try{const payload={username:$('adminUserUsername').value.trim(),name:$('adminUserName').value.trim(),role:$('adminUserRole').value,email:$('adminUserEmail').value.trim(),password:$('adminUserPassword').value,active:$('adminUserActive').checked};await requestJson('/admin/users',{method:'POST',body:payload});resetAdminUserForm();await loadAdminExtras();toast('User berhasil disimpan.','success')}catch(err){toast(err.message,'error')}finally{setLoading(submit,false,'Simpan User')}}
+async function saveAdminUser(e){e.preventDefault();const submit=e.submitter;setLoading(submit,true,'Menyimpan...');try{const payload={username:$('adminUserUsername').value.trim(),name:$('adminUserName').value.trim(),role:$('adminUserRole').value,email:$('adminUserEmail').value.trim(),password:$('adminUserPassword').value,active:$('adminUserActive').checked};await requestJson(appUrl('admin/users'),{method:'POST',body:payload});resetAdminUserForm();await loadAdminExtras();toast('User berhasil disimpan.','success')}catch(err){toast(err.message,'error')}finally{setLoading(submit,false,'Simpan User')}}
 
 function renderDocumentChecks(){$('documentChecks').innerHTML=DOCS.map(([v,l])=>`<label class="check"><input type="checkbox" name="missingDocument" value="${v}"><span><strong>${v}</strong> — ${l}</span></label>`).join('')}
 function parseDocs(v){return String(v||'').split(',').map(x=>x.trim()).filter(Boolean)}
