@@ -1,0 +1,5 @@
+<?php
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+return new class extends Migration { public function up(): void { Schema::create('invoices',function(Blueprint $t){$t->uuid('id')->primary();$t->string('invoice_no')->index();$t->string('po_no')->index();$t->string('supplier')->index();$t->date('received_date')->nullable()->index();$t->decimal('amount',18,2)->default(0);$t->string('receipt_no')->unique();$t->date('due_date')->nullable()->index();$t->string('status',60)->index();$t->string('missing_documents')->nullable();$t->text('notes')->nullable();$t->foreignId('pic_user_id')->nullable()->constrained('users')->nullOnDelete();$t->string('position',50)->nullable();$t->timestamp('status_updated_at')->nullable();$t->timestamp('completed_at')->nullable();$t->foreignId('accounting_pic_id')->nullable()->constrained('users')->nullOnDelete();$t->timestamps();$t->index(['status','pic_user_id']);$t->index(['status','accounting_pic_id']);}); } public function down(): void { Schema::dropIfExists('invoices'); } };
